@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Crisis Room</title>
+<style>
+/* BASE STYLES */
+body {
+background-color: #0d1117;
+color: #00ff41;
+font-family: 'Courier New', monospace;
+margin: 0;
+overflow: hidden;
+display: flex;
+flex-direction: column;
+height: 100vh;
+}
+
+/* PANIC OVERLAY (The Red Flash) */
+#panic-overlay {
+position: fixed;
+top: 0; left: 0; width: 100%; height: 100%;
+pointer-events: none;
+z-index: 10;
+transition: box-shadow 1s ease;
+}
+
+.panic-stage-1 { box-shadow: inset 0 0 100px rgba(255, 200, 0, 0.3); }
+.panic-stage-2 { box-shadow: inset 0 0 150px rgba(255, 0, 0, 0.6); animation: pulse 1s infinite; }
+.panic-stage-3 { box-shadow: inset 0 0 300px rgba(255, 0, 0, 0.9); animation: shake 0.5s infinite; filter: contrast(150%); }
+
+/* ANIMATIONS */
+@keyframes pulse { 50% { opacity: 0.5; } }
+@keyframes shake { 0% { transform: translate(1px, 1px); } 50% { transform: translate(-1px, -2px); } 100% { transform: translate(1px, -1px); } }
+
+/* TERMINAL WINDOW */
+#terminal {
+flex: 1;
+padding: 20px;
+overflow-y: auto;
+font-size: 18px;
+white-space: pre-wrap;
+z-index: 5;
+}
+
+/* INPUT AREA */
+#input-line {
+display: flex;
+padding: 20px;
+background: #000;
+z-index: 20;
+border-top: 1px solid #333;
+}
+
+input {
+background: transparent;
+border: none;
+color: #00ff41;
+font-family: inherit;
+font-size: 18px;
+width: 100%;
+outline: none;
+}
+
+/* TIMER */
+#timer {
+position: fixed;
+top: 20px;
+right: 30px;
+font-size: 24px;
+color: #00ff41;
+z-index: 100;
+}
+
+/* MODALS */
+.modal {
+display: none;
+position: fixed;
+top: 50%; left: 50%;
+transform: translate(-50%, -50%);
+background: #000;
+border: 2px solid;
+padding: 40px;
+text-align: center;
+z-index: 1000;
+}
+
+.win { border-color: cyan; color: cyan; }
+.fail { border-color: red; color: red; }
+</style>
+</head>
+<body>
+<div id="panic-overlay"></div>
+<div id="timer">T-MINUS: 60s</div>
+<audio id="bgMusic" loop src="/sounds/bg_music.mp3"></audio>
+<audio id="sfxAlarm" loop src="/sounds/alarm.mp3"></audio>
+<audio id="sfxWin" src="/sounds/win.mp3"></audio>
+<audio id="sfxFail" src="/sounds/fail.mp3"></audio>
+<div id="terminal">Initializing connection...</div>
+<div id="input-line">
+<span>root@server:~#&nbsp;</span>
+<input type="text" id="cmdInput" autofocus>
+</div>
+<div id="winModal" class="modal win">
+<h1>SYSTEM RESTORED</h1>
+<p>Crisis Averted. Good job, Engineer.</p>
+</div>
+<div id="failModal" class="modal fail">
+<h1>CONNECTION LOST</h1>
+<p>The system has crashed.</p>
+</div>
+
+<script>
+let sessionId = null;
+let timeLeft = 60;
+let gameActive = false;
+let timerInterval;
+
+// DOM ELEMENTS
+const terminal = document.getElementById('terminal');
+const input = document.getElementById('cmdInput');
+const timerDisplay = document.getElementById('timer');
+const panicOverlay = document.getElementById('panic-overlay');
+
+// AUDIO ELEMENTS
+const bgMusic = document.getElementById('bgMusic');
+const sfxAlarm = document.getElementById('sfxAlarm');
+
+// 1. INITIALIZE GAME
+async function initGame() {
+const res = await fetch('/api/start', { method: 'POST' });
+sessionId = await res.json(); // Takes UUID
+terminal.innerHTML += "\n> CONNECTION ESTABLISHED.\n> ALERT: HIGH MEMORY USAGE DETECTED.\n";
+startGameLoop();
+}
+
+// 2. GAME LOOP (TIMER & VISUALS)
+function startGameLoop() {
+gameActive = true;
+bgMusic.play();
+timerInterval = setInterval(() => {
+if (!gameActive) return;
+timeLeft--;
+timerDisplay.innerText = `T-MINUS: ${timeLeft}s`;
+
+// INTENSITY LOGIC
+if (timeLeft === 30) {
+panicOverlay.classList.add('panic-stage-1');
+bgMusic.playbackRate = 1.1;
+}
+if (timeLeft === 15) {
+panicOverlay.classList.add('panic-stage-2');
+sfxAlarm.play();
+timerDisplay.style.color = 'red';
+}
+if (timeLeft === 5) {
+panicOverlay.classList.add('panic-stage-3');
+}
+if (timeLeft <= 0) {
+endGame(false);
+}
+}, 1000);
+}
+
+// 3. INPUT HANDLER
+input.addEventListener('keypress', async (e) => {
+if (e.key === 'Enter' && gameActive) {
+const cmd = input.value;
+input.value = '';
+terminal.innerHTML += `\nroot@server:~# ${cmd}`;
+
+// Send to Backend
+const res = await fetch(`/api/command?sessionId=${sessionId}`, {
+method: 'POST',
+headers: { 'Content-Type': 'text/plain' },
+body: cmd
+});
+const text = await res.text();
+
+// Show AI Response
+terminal.innerHTML += `\n${text}\n`;
+terminal.scrollTop = terminal.scrollHeight;
+
+// Check Win
+if (text.includes("SUCCESS")) {
+endGame(true);
+}
+}
+});
+
+// 4. END GAME
+function endGame(isWin) {
+gameActive = false;
+clearInterval(timerInterval);
+bgMusic.pause();
+sfxAlarm.pause();
+panicOverlay.className = '';
+
+if (isWin) {
+document.getElementById('sfxWin').play();
+document.getElementById('winModal').style.display = 'block';
+} else {
+document.getElementById('sfxFail').play();
+document.getElementById('failModal').style.display = 'block';
+}
+}
+
+// Start on load
+window.onload = initGame;
+</script>
+</body>
+</html>
